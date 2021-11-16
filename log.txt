@@ -1,1 +1,0 @@
-PANIC: kernel.c:461: assertion 'p->p_state == P_RUNNABLE' failed

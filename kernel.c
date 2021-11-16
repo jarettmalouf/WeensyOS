@@ -82,6 +82,12 @@ void memshow_virtual_animate(void);
 
 static void process_setup(pid_t pid, int program_number);
 
+void free_pt(x86_64_pagetable *pt) {
+    int pn = PAGENUMBER(pt);
+    pageinfo[pn].owner = PO_FREE;
+    pageinfo[pn].refcount = 0;
+}
+
 void kernel(const char* command) {
     hardware_init();
     pageinfo_init();
@@ -119,12 +125,10 @@ void kernel(const char* command) {
     run(&processes[1]);
 }
 
-int get_free_page_number(int pages_needed) {
+int get_free_page_number() {
     int total_pages = PAGENUMBER(MEMSIZE_PHYSICAL);
     for (int i = 0; i < total_pages; i++) {
-        if (pageinfo[i].owner == PO_FREE) {
-            return i + pages_needed - 1 < total_pages ? i : -1;
-        }
+        if (pageinfo[i].owner == PO_FREE) return i;
     }
     return -1;
 }
@@ -134,7 +138,7 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     int i = 5;
 
 // L1
-    int page_number = get_free_page_number(i--);
+    int page_number = get_free_page_number();
     if (page_number == -1) return NULL;
 
     uintptr_t l1_addr = PAGEADDRESS(page_number);
@@ -147,15 +151,15 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     x86_64_pagetable *l1 = (x86_64_pagetable *) l1_addr;
     
 // L2
-    page_number = get_free_page_number(i--);
+    page_number = get_free_page_number();
     if (page_number == -1) {
-        // free(l1);
+        free_pt(l1);
         return NULL;
     }
 
     uintptr_t l2_addr = PAGEADDRESS(page_number);
 
-    page_result = assign_physical_page(l1_addr, pid);
+    page_result = assign_physical_page(l2_addr, pid);
     if (page_result == -1) return NULL;
 
     memset((void *) l2_addr, 0, sz_pt);
@@ -163,15 +167,15 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     x86_64_pagetable *l2 = (x86_64_pagetable *) l2_addr;
 
 // L3
-    page_number = get_free_page_number(i--);
+    page_number = get_free_page_number();
     if (page_number == -1) {
-        // free(l1); free(l2);
+        free_pt(l1); free_pt(l2);
         return NULL;
     }
 
     uintptr_t l3_addr = PAGEADDRESS(page_number);
 
-    page_result = assign_physical_page(l1_addr, pid);
+    page_result = assign_physical_page(l3_addr, pid);
     if (page_result == -1) return NULL;
 
     memset((void *) l3_addr, 0, sz_pt);
@@ -179,15 +183,15 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     x86_64_pagetable *l3 = (x86_64_pagetable *) l3_addr;
 
 // L4i
-    page_number = get_free_page_number(i--);
+    page_number = get_free_page_number();
     if (page_number == -1) {
-        // free(l1); free(l2); free(l3);
+        free_pt(l1); free_pt(l2); free_pt(l3);
         return NULL;
     }
 
     uintptr_t l4i_addr = PAGEADDRESS(page_number);
 
-    page_result = assign_physical_page(l1_addr, pid);
+    page_result = assign_physical_page(l4i_addr, pid);
     if (page_result == -1) return NULL;
 
     memset((void *) l4i_addr, 0, sz_pt);
@@ -195,15 +199,15 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     x86_64_pagetable *l4i = (x86_64_pagetable *) l4i_addr;
 
 // L4j
-    page_number = get_free_page_number(i--);
+    page_number = get_free_page_number();
     if (page_number == -1) {
-        // free(l1); free(l2); free(l3); free(l4i);
+        free_pt(l1); free_pt(l2); free_pt(l3); free_pt(l4i);
         return NULL;
     }
 
     uintptr_t l4j_addr = PAGEADDRESS(page_number);
 
-    page_result = assign_physical_page(l1_addr, pid);
+    page_result = assign_physical_page(l4j_addr, pid);
     if (page_result == -1) return NULL;
 
     memset((void *) l4j_addr, 0, sz_pt);
@@ -214,10 +218,10 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
 
     int user_perms = PTE_U | PTE_P | PTE_W;
 
-    l1->entry[0] = ((x86_64_pageentry_t) l2) | user_perms;
-    l2->entry[0] = ((x86_64_pageentry_t) l3) | user_perms;
-    l3->entry[0] = ((x86_64_pageentry_t) l4i) | user_perms;
-    l3->entry[1] = ((x86_64_pageentry_t) l4j) | user_perms;
+    l1->entry[0] = (x86_64_pageentry_t) l2 | user_perms;
+    l2->entry[0] = (x86_64_pageentry_t) l3 | user_perms;
+    l3->entry[0] = (x86_64_pageentry_t) l4i | user_perms;
+    l3->entry[1] = (x86_64_pageentry_t) l4j | user_perms;
 
     // Kernel copy over
 
@@ -235,19 +239,30 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
 //    %rip and %rsp, gives it a stack page, and marks it as runnable.
 
 void process_setup(pid_t pid, int program_number) {
+    process_init(&processes[pid], 0);
+
     x86_64_pagetable *pt = alloc_pt(pid);
     if (pt == NULL) return;
 
-    process_init(&processes[pid], 0);
     processes[pid].p_pagetable = pt;
-    ++pageinfo[PAGENUMBER(pt)].refcount;
     int r = program_load(&processes[pid], program_number, NULL);
     assert(r >= 0);
 
-    processes[pid].p_registers.reg_rsp = PROC_START_ADDR + PROC_SIZE * pid;
+    processes[pid].p_registers.reg_rsp = MEMSIZE_VIRTUAL;
     uintptr_t stack_page = processes[pid].p_registers.reg_rsp - PAGESIZE;
-    assign_physical_page(stack_page, pid);
-    virtual_memory_map(processes[pid].p_pagetable, stack_page, stack_page,
+
+    int stack_page_number = get_free_page_number();
+    if (stack_page_number == -1) {
+        free_pt(pt);
+        return;
+    }
+    uintptr_t stack_addr = PAGEADDRESS(stack_page_number);
+    int assign_status = assign_physical_page(stack_addr, pid);
+    if (assign_status == -1) {
+        free_pt(pt); free_pt((x86_64_pagetable *) stack_addr);
+        return;
+    }
+    virtual_memory_map(processes[pid].p_pagetable, stack_page, stack_addr,
                        PAGESIZE, PTE_P | PTE_W | PTE_U);
     processes[pid].p_state = P_RUNNABLE;
 }
