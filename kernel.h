@@ -64,6 +64,8 @@ void hardware_init(void);
 //    timer interrupt if `rate <= 0`.
 void timer_init(int rate);
 
+int get_free_page_number();
+
 
 // kernel page table (used for virtual memory)
 extern x86_64_pagetable* kernel_pagetable;

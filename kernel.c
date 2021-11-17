@@ -82,10 +82,23 @@ void memshow_virtual_animate(void);
 
 static void process_setup(pid_t pid, int program_number);
 
-void free_pt(x86_64_pagetable *pt) {
-    int pn = PAGENUMBER(pt);
+void free_page(uintptr_t page_ptr) {
+    int pn = PAGENUMBER(page_ptr);
     pageinfo[pn].owner = PO_FREE;
     pageinfo[pn].refcount = 0;
+}
+
+void free_pt(x86_64_pagetable *pt) {
+    x86_64_pagetable *l1 = pt;
+    x86_64_pagetable *l2 = (x86_64_pagetable *) l1->entry[0];
+    x86_64_pagetable *l3 = (x86_64_pagetable *) l2->entry[0];
+    x86_64_pagetable *l4i = (x86_64_pagetable *) l3->entry[0];
+    x86_64_pagetable *l4j = (x86_64_pagetable *) l3->entry[1];
+    free_page((uintptr_t) l1);
+    free_page((uintptr_t) l2);
+    free_page((uintptr_t) l3);
+    free_page((uintptr_t) l4i);
+    free_page((uintptr_t) l4j);
 }
 
 void kernel(const char* command) {
@@ -159,7 +172,7 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
 // L2
     page_number = get_free_page_number();
     if (page_number == -1) {
-        free_pt(l1);
+        free_page(l1_addr);
         return NULL;
     }
 
@@ -175,7 +188,7 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
 // L3
     page_number = get_free_page_number();
     if (page_number == -1) {
-        free_pt(l1); free_pt(l2);
+        free_page(l1_addr); free_page(l2_addr);
         return NULL;
     }
 
@@ -191,7 +204,7 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
 // L4i
     page_number = get_free_page_number();
     if (page_number == -1) {
-        free_pt(l1); free_pt(l2); free_pt(l3);
+        free_page(l1_addr); free_page(l2_addr); free_page(l3_addr);
         return NULL;
     }
 
@@ -207,7 +220,7 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
 // L4j
     page_number = get_free_page_number();
     if (page_number == -1) {
-        free_pt(l1); free_pt(l2); free_pt(l3); free_pt(l4i);
+        free_page(l1_addr); free_page(l2_addr); free_page(l3_addr); free_page(l4i_addr);
         return NULL;
     }
 
@@ -222,15 +235,13 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
 
 // Linking
 
-    int user_perms = PTE_U | PTE_P | PTE_W;
+    int perm = PTE_U | PTE_P | PTE_W;
 
-    l1->entry[0] = (x86_64_pageentry_t) l2 | user_perms;
-    l2->entry[0] = (x86_64_pageentry_t) l3 | user_perms;
-    l3->entry[0] = (x86_64_pageentry_t) l4i | user_perms;
-    l3->entry[1] = (x86_64_pageentry_t) l4j | user_perms;
+    l1->entry[0] = (x86_64_pageentry_t) l2 | perm;
+    l2->entry[0] = (x86_64_pageentry_t) l3 | perm;
+    l3->entry[0] = (x86_64_pageentry_t) l4i | perm;
+    l3->entry[1] = (x86_64_pageentry_t) l4j | perm;
 
-
-    copy_kernel_mapping(l1);
     return l1;
 }
 
@@ -246,6 +257,7 @@ void process_setup(pid_t pid, int program_number) {
     if (pt == NULL) return;
 
     processes[pid].p_pagetable = pt;
+    copy_kernel_mapping(pt);
     int r = program_load(&processes[pid], program_number, NULL);
     assert(r >= 0);
 
@@ -260,7 +272,7 @@ void process_setup(pid_t pid, int program_number) {
     uintptr_t stack_addr = PAGEADDRESS(stack_page_number);
     int assign_status = assign_physical_page(stack_addr, pid);
     if (assign_status == -1) {
-        free_pt(pt); free_pt((x86_64_pagetable *) stack_addr);
+        free_pt(pt); free_page(stack_addr);
         return;
     }
     virtual_memory_map(processes[pid].p_pagetable, stack_page, stack_addr,
@@ -338,18 +350,48 @@ int get_free_process_slot() {
     return -1;
 }
 
+void free_child_pages(int child_pid) {
+    for (uintptr_t va = 0; va < MEMSIZE_PHYSICAL; va += PAGESIZE) {
+        if (pageinfo[PAGENUMBER(va)].owner == child_pid) free_page(va);
+    }
+}
+
+void copy_registers(int parent_pid, int child_pid) {
+
+    processes[child_pid].p_registers = processes[parent_pid].p_registers;
+
+    // processes[child_pid].p_registers.reg_rcx = processes[parent_pid].p_registers.reg_rcx;
+    // processes[child_pid].p_registers.reg_rdx = processes[parent_pid].p_registers.reg_rdx;
+    // processes[child_pid].p_registers.reg_rbx = processes[parent_pid].p_registers.reg_rbx;
+    // processes[child_pid].p_registers.reg_rbp = processes[parent_pid].p_registers.reg_rbp;
+    // processes[child_pid].p_registers.reg_rsi = processes[parent_pid].p_registers.reg_rsi;
+    // processes[child_pid].p_registers.reg_rdi = processes[parent_pid].p_registers.reg_rdi;
+    // processes[child_pid].p_registers.reg_r8 = processes[parent_pid].p_registers.reg_r8;
+    // processes[child_pid].p_registers.reg_r9 = processes[parent_pid].p_registers.reg_r9;
+    // processes[child_pid].p_registers.reg_r10 = processes[parent_pid].p_registers.reg_r10;
+    // processes[child_pid].p_registers.reg_r11 = processes[parent_pid].p_registers.reg_r11;
+    // processes[child_pid].p_registers.reg_r12 = processes[parent_pid].p_registers.reg_r12;
+    // processes[child_pid].p_registers.reg_r13 = processes[parent_pid].p_registers.reg_r13;
+    // processes[child_pid].p_registers.reg_r14 = processes[parent_pid].p_registers.reg_r14;
+    // processes[child_pid].p_registers.reg_r15 = processes[parent_pid].p_registers.reg_r15;
+    // processes[child_pid].p_registers.reg_fs = processes[parent_pid].p_registers.reg_fs;
+    // processes[child_pid].p_registers.reg_gs = processes[parent_pid].p_registers.reg_gs;
+    // processes[child_pid].p_registers.reg_intno = processes[parent_pid].p_registers.reg_intno;
+    // processes[child_pid].p_registers.reg_err = processes[parent_pid].p_registers.reg_err;
+    // processes[child_pid].p_registers.reg_rip = processes[parent_pid].p_registers.reg_rip;
+    // processes[child_pid].p_registers.reg_cs = processes[parent_pid].p_registers.reg_cs;
+    // processes[child_pid].p_registers.reg_rflags = processes[parent_pid].p_registers.reg_rflags;
+    // processes[child_pid].p_registers.reg_rsp = processes[parent_pid].p_registers.reg_rsp;
+    // processes[child_pid].p_registers.reg_ss = processes[parent_pid].p_registers.reg_ss;
+    // for (int i = 0; i < 3; i++) {
+    //     processes[child_pid].p_registers.reg_padding2[i] = processes[parent_pid].p_registers.reg_padding2[i];
+    //     processes[child_pid].p_registers.reg_padding3[i] = processes[parent_pid].p_registers.reg_padding3[i];
+    // }
+}
+
 void exception(x86_64_registers* reg) {
-    // Copy the saved registers into the `current` process descriptor
-    // and always use the kernel's page table.
     current->p_registers = *reg;
     set_pagetable(kernel_pagetable);
-
-    // It can be useful to log events using `log_printf`.
-    // Events logged this way are stored in the host's `log.txt` file.
-    /*log_printf("proc %d: exception %d\n", current->p_pid, reg->reg_intno);*/
-
-    // Show the current cursor location and memory state
-    // (unless this is a kernel fault).
     console_show_cursor(cursorpos);
     if ((reg->reg_intno != INT_PAGEFAULT && reg->reg_intno != INT_GPF) // no error due to pagefault or general fault
             || (reg->reg_err & PFERR_USER)) // pagefault error in user mode 
@@ -360,19 +402,77 @@ void exception(x86_64_registers* reg) {
             memshow_virtual_animate();
         }
     }
-
-    // If Control-C was typed, exit the virtual machine.
     check_keyboard();
-
 
     // Actually handle the exception.
     switch (reg->reg_intno) {
     case INT_SYS_FORK:
-        int process_slot = get_free_process_slot();
-        if (process_slot == -1) {
+        int child_pid = get_free_process_slot();
+        if (child_pid == -1) {
             current->p_registers.reg_rax = -1; break;
         }
-        // x86_64_pagetable *pt_copy = 
+        process_init(&processes[child_pid], 0);
+        x86_64_pagetable *child_pt = alloc_pt(child_pid);
+        vamapping map_;
+
+        for (uintptr_t va = 0; va < MEMSIZE_VIRTUAL; va += PAGESIZE) {
+            map_ = virtual_memory_lookup(current->p_pagetable, va);
+            if (map_.perm & PTE_U && va != CONSOLE_ADDR) { 
+                int free_page_number = get_free_page_number();
+                if (free_page_number == -1) {
+                    free_child_pages(child_pid);
+                    free_pt(child_pt);
+                    current->p_registers.reg_rax = -1; 
+                    break;
+                }
+
+                uintptr_t addr = PAGEADDRESS(free_page_number);
+                int assign_status = assign_physical_page(addr, child_pid);
+                if (assign_status == -1) {
+                    free_child_pages(child_pid);
+                    free_pt(child_pt);
+                    current->p_registers.reg_rax = -1; 
+                    break;
+                }
+                memcpy((void *) addr, (void *) map_.pa, PAGESIZE);
+                int map_status = virtual_memory_map(child_pt, va, addr, PAGESIZE, map_.perm);
+                if (map_status == -1) {
+                    free_child_pages(child_pid);
+                    free_pt(child_pt);
+                    current->p_registers.reg_rax = -1; 
+                    break;
+                }
+            } else {
+                int map_status = virtual_memory_map(child_pt, va, map_.pa, PAGESIZE, map_.perm);
+                if (map_status == -1) {
+                    free_child_pages(child_pid);
+                    free_pt(child_pt);
+                    current->p_registers.reg_rax = -1; 
+                    break;
+                }
+                // pageinfo[PAGENUMBER(map_.pa)].refcount++; 
+            }
+        }
+
+        copy_registers(current->p_pid, child_pid);
+        processes[child_pid].p_pid = child_pid;
+        processes[child_pid].p_pagetable = child_pt;
+
+        processes[child_pid].p_registers.reg_rax = 0;
+        processes[current->p_pid].p_registers.reg_rax = child_pid;
+
+        processes[child_pid].p_state = processes[current->p_pid].p_state;
+        processes[child_pid].display_status = processes[current->p_pid].display_status;
+
+        break;
+    case INT_SYS_EXIT:
+        // loop through va space
+        // if it owns a page (not a shared page) -- if current->p_pid == owner of page you're looking at
+            // free the page
+        // else
+            // refcount--
+        // free pts
+        // set p_state to FREE
         break;
     case INT_SYS_PANIC:
 	    // rdi stores pointer for msg string
@@ -404,7 +504,7 @@ void exception(x86_64_registers* reg) {
             current->p_registers.reg_rax = -1; break;
         }
         uintptr_t pa = PAGEADDRESS(pn);
-        if (addr < PROC_START_ADDR || addr > MEMSIZE_VIRTUAL || addr % PAGESIZE != 0) {
+        if (addr < PROC_START_ADDR || addr >= MEMSIZE_VIRTUAL || addr % PAGESIZE != 0) {
             current->p_registers.reg_rax = -1; break;
         }
         

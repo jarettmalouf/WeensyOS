@@ -121,8 +121,8 @@ int virtual_memory_map(x86_64_pagetable* pagetable, uintptr_t va, uintptr_t pa, 
         }
         if ((perm & PTE_P) && l4pagetable) { // if page is marked present
             // TODO
-            l4pagetable->entry[L4PAGEINDEX(va)] = pa | perm;
             // map `pa` at appropriate entry with permissions `perm`
+            l4pagetable->entry[L4PAGEINDEX(va)] = pa | perm;
         } else if (l4pagetable) { // if page is NOT marked present
             // TODO
             // map to address 0 with `perm`
