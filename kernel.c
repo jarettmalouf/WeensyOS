@@ -126,11 +126,17 @@ void kernel(const char* command) {
 }
 
 int get_free_page_number() {
-    int total_pages = PAGENUMBER(MEMSIZE_PHYSICAL);
-    for (int i = 0; i < total_pages; i++) {
+    for (int i = 0; i < PAGENUMBER(MEMSIZE_PHYSICAL); i++) {
         if (pageinfo[i].owner == PO_FREE) return i;
     }
     return -1;
+}
+
+void copy_kernel_mapping(x86_64_pagetable *pt) {
+    for (int va = 0; va < PROC_START_ADDR; va += PAGESIZE) {
+        vamapping map = virtual_memory_lookup(kernel_pagetable, va);
+        virtual_memory_map(pt, va, map.pa, PAGESIZE, map.perm);
+    }
 }
 
 x86_64_pagetable *alloc_pt(pid_t pid) {
@@ -214,7 +220,7 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
 
     x86_64_pagetable *l4j = (x86_64_pagetable *) l4j_addr;
 
-    // Linking
+// Linking
 
     int user_perms = PTE_U | PTE_P | PTE_W;
 
@@ -223,13 +229,8 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     l3->entry[0] = (x86_64_pageentry_t) l4i | user_perms;
     l3->entry[1] = (x86_64_pageentry_t) l4j | user_perms;
 
-    // Kernel copy over
 
-    for (int va = 0; va < PROC_START_ADDR; va += PAGESIZE) {
-        vamapping map = virtual_memory_lookup(kernel_pagetable, va);
-        virtual_memory_map(l1, va, map.pa, PAGESIZE, map.perm);
-    }
-
+    copy_kernel_mapping(l1);
     return l1;
 }
 
@@ -330,6 +331,13 @@ void syscall_mem_tog(proc* process){
 //
 //    Note that hardware interrupts are disabled whenever the kernel is running.
 
+int get_free_process_slot() {
+    for (int i = 1; i < NPROC; i++) {
+        if (processes[i].p_state == P_FREE) return i;
+    }
+    return -1;
+}
+
 void exception(x86_64_registers* reg) {
     // Copy the saved registers into the `current` process descriptor
     // and always use the kernel's page table.
@@ -359,7 +367,13 @@ void exception(x86_64_registers* reg) {
 
     // Actually handle the exception.
     switch (reg->reg_intno) {
-
+    case INT_SYS_FORK:
+        int process_slot = get_free_process_slot();
+        if (process_slot == -1) {
+            current->p_registers.reg_rax = -1; break;
+        }
+        // x86_64_pagetable *pt_copy = 
+        break;
     case INT_SYS_PANIC:
 	    // rdi stores pointer for msg string
 	    {
@@ -385,12 +399,18 @@ void exception(x86_64_registers* reg) {
 
     case INT_SYS_PAGE_ALLOC: {
         uintptr_t addr = current->p_registers.reg_rdi;
+        int pn = get_free_page_number();
+        if (pn == -1) {
+            current->p_registers.reg_rax = -1; break;
+        }
+        uintptr_t pa = PAGEADDRESS(pn);
         if (addr < PROC_START_ADDR || addr > MEMSIZE_VIRTUAL || addr % PAGESIZE != 0) {
             current->p_registers.reg_rax = -1; break;
         }
-        int r = assign_physical_page(addr, current->p_pid);
+        
+        int r = assign_physical_page(pa, current->p_pid);
         if (r >= 0) {
-            virtual_memory_map(current->p_pagetable, addr, addr,
+            virtual_memory_map(current->p_pagetable, addr, pa,
                                PAGESIZE, PTE_P | PTE_W | PTE_U);
         }
         current->p_registers.reg_rax = r;

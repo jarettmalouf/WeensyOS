@@ -1,38 +1,30 @@
 #include "process.h"
 #include "lib.h"
 
-#define ALLOC_SLOWDOWN 100
-#define MAX_ALLOC 100
-
-#ifndef KERNEL_ADDR
-#define KERNEL_ADDR 0x10000
-#endif
-
-#ifndef MEMSIZE_VIRTUAL
-#define MEMSIZE_VIRTUAL 0x300000
-#endif
+#define N 30
 extern uint8_t end[];
-
-uint8_t* heap_top;
-uint8_t* stack_bottom;
 
 void process_main(void) {
     pid_t p = sys_getpid();
     srand(p);
-    // The heap starts on the page right after the 'end' symbol,
-    // whose address is the first address not allocated to process code
-    // or data.
-    heap_top = ROUNDUP((uint8_t*) end, PAGESIZE);
 
-    // Test for alignment
-    int x = sys_page_alloc((void *) (end + 0x10));
-    if(x != -1){
-        panic("Error, sys_page_alloc doesn't check for alignment!");
-    }
-    // Test for accessing beyond size limits
-    x = sys_page_alloc((void *) MEMSIZE_VIRTUAL + PAGESIZE);
-    if(x != -1){
-        panic("Error, sys_page_alloc doesn't check for VM bounds!");
+    vamapping pmap;
+    uint8_t * heap_top = ROUNDUP((uint8_t*) end, PAGESIZE);
+
+    // test N times
+    for(int i = 0 ; i < N ; i++){
+        int x = sys_page_alloc(heap_top);
+        if(x != 0)
+            panic("Error, sys_page_alloc failed!");
+        // lets make sure we write to the page and are able to read from it
+        *heap_top = p;
+        assert(*heap_top == p);
+        sys_mapping((uintptr_t)heap_top, &pmap);
+
+        if(pmap.pa == (uintptr_t)heap_top)
+            panic("Error, sys page alloc not virtualized!");
+
+        heap_top += PAGESIZE;
     }
 
     TEST_PASS();
