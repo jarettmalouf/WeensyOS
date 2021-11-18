@@ -401,7 +401,7 @@ void exception(x86_64_registers* reg) {
             fail = 1;
             break;
         }
-
+        
         vamapping map_;
 
         for (uintptr_t va = 0; va < MEMSIZE_VIRTUAL; va += PAGESIZE) {
@@ -461,7 +461,7 @@ void exception(x86_64_registers* reg) {
             }
         }
 
-        if (!fail) {
+        if (fail == 0) {
             processes[child_pid].p_pid = child_pid;
             processes[child_pid].p_registers = processes[current->p_pid].p_registers;
             processes[child_pid].p_registers.reg_rax = 0;

@@ -3,8 +3,8 @@
 0000000000001348 A _binary_obj_p_allocator4_size
 0000000000001348 A _binary_obj_p_allocator_size
 00000000000013f8 A _binary_obj_p_forkexit_size
+0000000000001588 A _binary_obj_p_test_size
 0000000000001670 A _binary_obj_p_fork_size
-0000000000001690 A _binary_obj_p_test_size
 0000000000040000 T entry_from_boot
 000000000004002e T gpf_int_handler
 0000000000040032 T pagefault_int_handler
@@ -129,7 +129,7 @@
 000000000004c420 D _binary_obj_p_forkexit_start
 000000000004d818 D _binary_obj_p_forkexit_end
 000000000004d818 D _binary_obj_p_test_start
-000000000004eea8 D _binary_obj_p_test_end
+000000000004eda0 D _binary_obj_p_test_end
 000000000004f000 B current
 000000000004f020 b processes
 000000000004fe20 b ticks

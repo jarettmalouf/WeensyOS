@@ -1591,7 +1591,7 @@ void exception(x86_64_registers* reg) {
             break;
    40dc5:	e9 1d 08 00 00       	jmpq   415e7 <exception+0x967>
         }
-
+        
         vamapping map_;
 
         for (uintptr_t va = 0; va < MEMSIZE_VIRTUAL; va += PAGESIZE) {
@@ -1832,7 +1832,7 @@ void exception(x86_64_registers* reg) {
             }
         }
 
-        if (!fail) {
+        if (fail == 0) {
    410a4:	83 7d fc 00          	cmpl   $0x0,-0x4(%rbp)
    410a8:	0f 85 38 05 00 00    	jne    415e6 <exception+0x966>
             processes[child_pid].p_pid = child_pid;
