@@ -95,6 +95,7 @@ static int program_load_segment(proc* p, const elf_program* ph,
     for (uintptr_t addr = va; addr < end_mem; addr += PAGESIZE) {
         int free_page_number = get_free_page_number();
         if (free_page_number < 0) {
+            free_process_pages(p->p_pid, p->p_pagetable);
             console_printf(CPOS(22, 0), 0xC000, "program_load_segment(pid %d): can't assign address %p\n", p->p_pid, addr);
             return -1;
         }
@@ -102,6 +103,7 @@ static int program_load_segment(proc* p, const elf_program* ph,
         uintptr_t new_addr = PAGEADDRESS(free_page_number);
         int assign_status = assign_physical_page(new_addr, p->p_pid);
         if (assign_status < 0) {
+            free_process_pages(p->p_pid, p->p_pagetable);
             console_printf(CPOS(22, 0), 0xC000, "program_load_segment(pid %d): can't assign address %p\n", p->p_pid, addr);
             return -1;
         }

@@ -4,7 +4,7 @@
 
 extern uint8_t end[];
 
-// These global variables go on the data page.
+// // These global variables go on the data page.
 uint8_t* heap_top;
 uint8_t* stack_bottom;
 

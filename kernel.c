@@ -90,15 +90,15 @@ void free_page(uintptr_t page_ptr) {
 
 void free_pt(x86_64_pagetable *pt) {
     x86_64_pagetable *l1 = pt;
-    x86_64_pagetable *l2 = (x86_64_pagetable *) l1->entry[0];
-    x86_64_pagetable *l3 = (x86_64_pagetable *) l2->entry[0];
-    x86_64_pagetable *l4i = (x86_64_pagetable *) l3->entry[0];
-    x86_64_pagetable *l4j = (x86_64_pagetable *) l3->entry[1];
-    free_page((uintptr_t) l1);
-    free_page((uintptr_t) l2);
-    free_page((uintptr_t) l3);
-    free_page((uintptr_t) l4i);
+    x86_64_pagetable *l2 = (x86_64_pagetable *) PTE_ADDR(l1->entry[0]);
+    x86_64_pagetable *l3 = (x86_64_pagetable *) PTE_ADDR(l2->entry[0]);
+    x86_64_pagetable *l4i = (x86_64_pagetable *) PTE_ADDR(l3->entry[0]);
+    x86_64_pagetable *l4j = (x86_64_pagetable *) PTE_ADDR(l3->entry[1]);
     free_page((uintptr_t) l4j);
+    free_page((uintptr_t) l4i);
+    free_page((uintptr_t) l3);
+    free_page((uintptr_t) l2);
+    free_page((uintptr_t) l1);
 }
 
 void kernel(const char* command) {
@@ -163,7 +163,10 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     uintptr_t l1_addr = PAGEADDRESS(page_number);
 
     int page_result = assign_physical_page(l1_addr, pid);
-    if (page_result == -1) return NULL;
+    if (page_result == -1) {
+        free_page(l1_addr);
+        return NULL;
+    }
 
     memset((void *) l1_addr, 0, sz_pt);
 
@@ -179,7 +182,10 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     uintptr_t l2_addr = PAGEADDRESS(page_number);
 
     page_result = assign_physical_page(l2_addr, pid);
-    if (page_result == -1) return NULL;
+    if (page_result == -1) {
+        free_page(l1_addr); free_page(l2_addr);
+        return NULL;
+    }
 
     memset((void *) l2_addr, 0, sz_pt);
 
@@ -195,7 +201,10 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     uintptr_t l3_addr = PAGEADDRESS(page_number);
 
     page_result = assign_physical_page(l3_addr, pid);
-    if (page_result == -1) return NULL;
+    if (page_result == -1) {
+        free_page(l1_addr); free_page(l2_addr); free_page(l3_addr);
+        return NULL;
+    }
 
     memset((void *) l3_addr, 0, sz_pt);
 
@@ -211,7 +220,10 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     uintptr_t l4i_addr = PAGEADDRESS(page_number);
 
     page_result = assign_physical_page(l4i_addr, pid);
-    if (page_result == -1) return NULL;
+    if (page_result == -1) {
+        free_page(l1_addr); free_page(l2_addr); free_page(l3_addr); free_page(l4i_addr);
+        return NULL;
+    }
 
     memset((void *) l4i_addr, 0, sz_pt);
 
@@ -227,7 +239,10 @@ x86_64_pagetable *alloc_pt(pid_t pid) {
     uintptr_t l4j_addr = PAGEADDRESS(page_number);
 
     page_result = assign_physical_page(l4j_addr, pid);
-    if (page_result == -1) return NULL;
+    if (page_result == -1) {
+        free_page(l1_addr); free_page(l2_addr); free_page(l3_addr); free_page(l4i_addr); free_page(l4j_addr);
+        return NULL;
+    }
 
     memset((void *) l4j_addr, 0, sz_pt);
 
@@ -308,12 +323,12 @@ void syscall_mapping(proc* p){
 
     // check for write access
     if((map.perm & (PTE_W|PTE_U)) != (PTE_W|PTE_U))
-	return;
+    return;
     uintptr_t endaddr = map.pa + sizeof(vamapping) - 1;
     // check for write access for end address
     vamapping end_map = virtual_memory_lookup(p->p_pagetable, endaddr);
     if((end_map.perm & (PTE_W|PTE_P)) != (PTE_W|PTE_P))
-	return;
+    return;
     // find the actual mapping now
     vamapping ptr_lookup = virtual_memory_lookup(p->p_pagetable, ptr);
     memcpy((void *)map.pa, &ptr_lookup, sizeof(vamapping));
@@ -350,43 +365,10 @@ int get_free_process_slot() {
     return -1;
 }
 
-void free_child_pages(int child_pid) {
-    for (uintptr_t va = 0; va < MEMSIZE_PHYSICAL; va += PAGESIZE) {
-        if (pageinfo[PAGENUMBER(va)].owner == child_pid) free_page(va);
+void free_process_pages(int pid, x86_64_pagetable *pt) {
+    for (uintptr_t va = 0; va < MEMSIZE_VIRTUAL; va += PAGESIZE) {
+        if (pageinfo[PAGENUMBER(va)].owner == pid) free_page(va);
     }
-}
-
-void copy_registers(int parent_pid, int child_pid) {
-
-    processes[child_pid].p_registers = processes[parent_pid].p_registers;
-
-    // processes[child_pid].p_registers.reg_rcx = processes[parent_pid].p_registers.reg_rcx;
-    // processes[child_pid].p_registers.reg_rdx = processes[parent_pid].p_registers.reg_rdx;
-    // processes[child_pid].p_registers.reg_rbx = processes[parent_pid].p_registers.reg_rbx;
-    // processes[child_pid].p_registers.reg_rbp = processes[parent_pid].p_registers.reg_rbp;
-    // processes[child_pid].p_registers.reg_rsi = processes[parent_pid].p_registers.reg_rsi;
-    // processes[child_pid].p_registers.reg_rdi = processes[parent_pid].p_registers.reg_rdi;
-    // processes[child_pid].p_registers.reg_r8 = processes[parent_pid].p_registers.reg_r8;
-    // processes[child_pid].p_registers.reg_r9 = processes[parent_pid].p_registers.reg_r9;
-    // processes[child_pid].p_registers.reg_r10 = processes[parent_pid].p_registers.reg_r10;
-    // processes[child_pid].p_registers.reg_r11 = processes[parent_pid].p_registers.reg_r11;
-    // processes[child_pid].p_registers.reg_r12 = processes[parent_pid].p_registers.reg_r12;
-    // processes[child_pid].p_registers.reg_r13 = processes[parent_pid].p_registers.reg_r13;
-    // processes[child_pid].p_registers.reg_r14 = processes[parent_pid].p_registers.reg_r14;
-    // processes[child_pid].p_registers.reg_r15 = processes[parent_pid].p_registers.reg_r15;
-    // processes[child_pid].p_registers.reg_fs = processes[parent_pid].p_registers.reg_fs;
-    // processes[child_pid].p_registers.reg_gs = processes[parent_pid].p_registers.reg_gs;
-    // processes[child_pid].p_registers.reg_intno = processes[parent_pid].p_registers.reg_intno;
-    // processes[child_pid].p_registers.reg_err = processes[parent_pid].p_registers.reg_err;
-    // processes[child_pid].p_registers.reg_rip = processes[parent_pid].p_registers.reg_rip;
-    // processes[child_pid].p_registers.reg_cs = processes[parent_pid].p_registers.reg_cs;
-    // processes[child_pid].p_registers.reg_rflags = processes[parent_pid].p_registers.reg_rflags;
-    // processes[child_pid].p_registers.reg_rsp = processes[parent_pid].p_registers.reg_rsp;
-    // processes[child_pid].p_registers.reg_ss = processes[parent_pid].p_registers.reg_ss;
-    // for (int i = 0; i < 3; i++) {
-    //     processes[child_pid].p_registers.reg_padding2[i] = processes[parent_pid].p_registers.reg_padding2[i];
-    //     processes[child_pid].p_registers.reg_padding3[i] = processes[parent_pid].p_registers.reg_padding3[i];
-    // }
 }
 
 void exception(x86_64_registers* reg) {
@@ -403,6 +385,7 @@ void exception(x86_64_registers* reg) {
         }
     }
     check_keyboard();
+    int fail = 0;
 
     // Actually handle the exception.
     switch (reg->reg_intno) {
@@ -411,83 +394,112 @@ void exception(x86_64_registers* reg) {
         if (child_pid == -1) {
             current->p_registers.reg_rax = -1; break;
         }
+
         process_init(&processes[child_pid], 0);
         x86_64_pagetable *child_pt = alloc_pt(child_pid);
+        if (child_pt == NULL)  {
+            fail = 1;
+            break;
+        }
+
         vamapping map_;
 
         for (uintptr_t va = 0; va < MEMSIZE_VIRTUAL; va += PAGESIZE) {
             map_ = virtual_memory_lookup(current->p_pagetable, va);
-            if (map_.perm & PTE_U && va != CONSOLE_ADDR) { 
-                int free_page_number = get_free_page_number();
-                if (free_page_number == -1) {
-                    free_child_pages(child_pid);
+            if (map_.pn == -1) continue;
+            if ((map_.perm & (PTE_P | PTE_U)) && !(map_.perm & PTE_W)) {
+                pageinfo[PAGENUMBER(map_.pa)].refcount++; 
+                int map_status = virtual_memory_map(child_pt, va, map_.pa, PAGESIZE, map_.perm);
+                if (map_status == -1) {
+                    free_process_pages(child_pid, child_pt);
                     free_pt(child_pt);
                     current->p_registers.reg_rax = -1; 
+                    fail = 1;
+                    break;
+                }
+                continue;
+            }
+            if (map_.perm & PTE_U && va != CONSOLE_ADDR) {
+                int free_page_number = get_free_page_number();
+                if (free_page_number == -1) {
+                    free_process_pages(child_pid, child_pt);
+                    free_pt(child_pt);
+                    current->p_registers.reg_rax = -1; 
+                    fail = 1;
                     break;
                 }
 
                 uintptr_t addr = PAGEADDRESS(free_page_number);
                 int assign_status = assign_physical_page(addr, child_pid);
                 if (assign_status == -1) {
-                    free_child_pages(child_pid);
+                    free_page(addr);
+                    free_process_pages(child_pid, child_pt);
                     free_pt(child_pt);
                     current->p_registers.reg_rax = -1; 
+                    fail = 1;
                     break;
                 }
                 memcpy((void *) addr, (void *) map_.pa, PAGESIZE);
                 int map_status = virtual_memory_map(child_pt, va, addr, PAGESIZE, map_.perm);
                 if (map_status == -1) {
-                    free_child_pages(child_pid);
+                    free_process_pages(child_pid, child_pt);
                     free_pt(child_pt);
                     current->p_registers.reg_rax = -1; 
+                    fail = 1;
                     break;
                 }
-            } else {
+            } 
+            else {
                 int map_status = virtual_memory_map(child_pt, va, map_.pa, PAGESIZE, map_.perm);
                 if (map_status == -1) {
-                    free_child_pages(child_pid);
+                    free_process_pages(child_pid, child_pt);
                     free_pt(child_pt);
-                    current->p_registers.reg_rax = -1; 
+                    current->p_registers.reg_rax = -1;
+                    fail = 1; 
                     break;
                 }
-                // pageinfo[PAGENUMBER(map_.pa)].refcount++; 
             }
         }
 
-        copy_registers(current->p_pid, child_pid);
-        processes[child_pid].p_pid = child_pid;
-        processes[child_pid].p_pagetable = child_pt;
-
-        processes[child_pid].p_registers.reg_rax = 0;
-        processes[current->p_pid].p_registers.reg_rax = child_pid;
-
-        processes[child_pid].p_state = processes[current->p_pid].p_state;
-        processes[child_pid].display_status = processes[current->p_pid].display_status;
+        if (!fail) {
+            processes[child_pid].p_pid = child_pid;
+            processes[child_pid].p_registers = processes[current->p_pid].p_registers;
+            processes[child_pid].p_registers.reg_rax = 0;
+            processes[child_pid].p_state = processes[current->p_pid].p_state;
+            processes[child_pid].display_status = processes[current->p_pid].display_status;
+            processes[child_pid].p_pagetable = child_pt;
+            processes[current->p_pid].p_registers.reg_rax = child_pid;
+        }
 
         break;
     case INT_SYS_EXIT:
-        // loop through va space
-        // if it owns a page (not a shared page) -- if current->p_pid == owner of page you're looking at
-            // free the page
-        // else
-            // refcount--
-        // free pts
-        // set p_state to FREE
+        vamapping map__;
+        for (uintptr_t va = PROC_START_ADDR; va < MEMSIZE_VIRTUAL; va += PAGESIZE) {
+            map__ = virtual_memory_lookup(current->p_pagetable, va);
+            if (map__.pn == -1) continue;
+            pageinfo[PAGENUMBER(map__.pa)].refcount--;
+            if (pageinfo[PAGENUMBER(map__.pa)].refcount == 0) {
+                pageinfo[PAGENUMBER(map__.pa)].owner = PO_FREE;
+            }
+            
+        }
+        free_pt(current->p_pagetable);
+        current->p_state = P_FREE;
         break;
     case INT_SYS_PANIC:
-	    // rdi stores pointer for msg string
-	    {
-		char msg[160];
-		uintptr_t addr = current->p_registers.reg_rdi;
-		if((void *)addr == NULL)
-		    panic(NULL);
-		vamapping map = virtual_memory_lookup(current->p_pagetable, addr);
-		memcpy(msg, (void *)map.pa, 160);
-		panic(msg);
+        // rdi stores pointer for msg string
+        {
+        char msg[160];
+        uintptr_t addr = current->p_registers.reg_rdi;
+        if((void *)addr == NULL)
+            panic(NULL);
+        vamapping map = virtual_memory_lookup(current->p_pagetable, addr);
+        memcpy(msg, (void *)map.pa, 160);
+        panic(msg);
 
-	    }
-	    panic(NULL);
-	    break;                  // will not be reached
+        }
+        panic(NULL);
+        break;                  // will not be reached
 
     case INT_SYS_GETPID:
         current->p_registers.reg_rax = current->p_pid;
@@ -501,6 +513,7 @@ void exception(x86_64_registers* reg) {
         uintptr_t addr = current->p_registers.reg_rdi;
         int pn = get_free_page_number();
         if (pn == -1) {
+            console_printf(CPOS(24, 0), 0x0C00, "Out of physical memory :(\n");
             current->p_registers.reg_rax = -1; break;
         }
         uintptr_t pa = PAGEADDRESS(pn);
@@ -512,22 +525,22 @@ void exception(x86_64_registers* reg) {
         if (r >= 0) {
             virtual_memory_map(current->p_pagetable, addr, pa,
                                PAGESIZE, PTE_P | PTE_W | PTE_U);
-        }
+        } else free_page(pa);
         current->p_registers.reg_rax = r;
         break;
     }
 
     case INT_SYS_MAPPING:
     {
-	    syscall_mapping(current);
+        syscall_mapping(current);
             break;
     }
 
     case INT_SYS_MEM_TOG:
-	{
-	    syscall_mem_tog(current);
-	    break;
-	}
+    {
+        syscall_mem_tog(current);
+        break;
+    }
 
     case INT_TIMER:
         ++ticks;
@@ -762,7 +775,7 @@ void memshow_physical(void) {
 #ifdef SHARED
             color = SHARED_COLOR | 0x0F00;
 #else
-	    color &= 0x77FF;
+        color &= 0x77FF;
 #endif
         }
 
@@ -804,7 +817,7 @@ void memshow_virtual(x86_64_pagetable* pagetable, const char* name) {
                     color = color | 0x0F00;
 
 #else
-		color &= 0x77FF;
+        color &= 0x77FF;
 #endif
             }
         }
@@ -844,3 +857,4 @@ void memshow_virtual_animate(void) {
         memshow_virtual(processes[showing].p_pagetable, s);
     }
 }
+

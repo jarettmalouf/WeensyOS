@@ -95,6 +95,7 @@ int virtual_memory_map(x86_64_pagetable* pagetable, uintptr_t va, uintptr_t pa, 
 //    Returns information about the mapping of the virtual address `va` in
 //    `pagetable`. The information is returned as a `vamapping` object,
 //    which has the following components:
+void free_process_pages(int child_pid, x86_64_pagetable *pt);
 
 vamapping virtual_memory_lookup(x86_64_pagetable* pagetable, uintptr_t va);
 
