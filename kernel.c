@@ -154,7 +154,6 @@ void copy_kernel_mapping(x86_64_pagetable *pt) {
 
 x86_64_pagetable *alloc_pt(pid_t pid) {
     size_t sz_pt = sizeof(struct x86_64_pagetable);
-    int i = 5;
 
 // L1
     int page_number = get_free_page_number();
