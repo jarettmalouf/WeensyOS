@@ -510,7 +510,7 @@ void exception(x86_64_registers* reg) {
 
     case INT_SYS_PAGE_ALLOC: {
         uintptr_t addr = current->p_registers.reg_rdi;
-        int pn = get_free_page_number();
+        int pn = get_free_page_number();    
         if (pn == -1) {
             console_printf(CPOS(24, 0), 0x0C00, "Out of physical memory :(\n");
             current->p_registers.reg_rax = -1; break;

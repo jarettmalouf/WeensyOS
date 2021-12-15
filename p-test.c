@@ -1,32 +1,39 @@
 #include "process.h"
 #include "lib.h"
 
-#define N 30
+#define ALLOC_SLOWDOWN 100
+#define MAX_ALLOC 100
+
+#ifndef KERNEL_ADDR
+#define KERNEL_ADDR 0x10000
+#endif
+
+#ifndef MEMSIZE_VIRTUAL
 #define MEMSIZE_VIRTUAL 0x300000
+#endif
 extern uint8_t end[];
+
+uint8_t* heap_top;
+uint8_t* stack_bottom;
 
 void process_main(void) {
     pid_t p = sys_getpid();
     srand(p);
+    // The heap starts on the page right after the 'end' symbol,
+    // whose address is the first address not allocated to process code
+    // or data.
+    heap_top = ROUNDUP((uint8_t*) end, PAGESIZE);
 
-    // lets first check where stack is in VM
-    uint8_t * stack_bottom = ROUNDDOWN((uint8_t*) read_rsp() - 1, PAGESIZE);
-
-    // we want it to be at the end of VM, i.e. 0x300000
-    assert((uintptr_t)stack_bottom == (MEMSIZE_VIRTUAL - PAGESIZE));
-
-    // Now, lets check how its allocated
-    vamapping smap;
-    sys_mapping((uintptr_t) stack_bottom, &smap);
-
-    if(smap.pa == (uintptr_t)stack_bottom){
-        // This case shouldn't take place now that we checked stack is at end
-        // Consider ghostly interference
-        panic("Error, stack is not allocated virtually");
+    // Test for alignment
+    int x = sys_page_alloc((void *) (end + 0x10));
+    if(x != -1){
+        panic("Error, sys_page_alloc doesn't check for alignment!");
+    }
+    // Test for accessing beyond size limits
+    x = sys_page_alloc((void *) MEMSIZE_VIRTUAL + PAGESIZE);
+    if(x != -1){
+        panic("Error, sys_page_alloc doesn't check for VM bounds!");
     }
 
-    // No need to check perm, otherwise nothing will work
-    int i = p;
-    assert(i == p);
     TEST_PASS();
 }
